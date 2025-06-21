@@ -1,0 +1,58 @@
+name: Create GitHub Repository
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  create-repository:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.ROLE_ARN }}
+        role-session-name: terraform-github-actions
+        aws-region: ap-northeast-1
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: "1.11.0"
+
+    - name: Generate GitHub App Token
+      id: generate_token
+      uses: actions/create-github-app-token@v1
+      with:
+        app-id: ${{ secrets.GH_APP_APP_ID }} # Repository SecretにGitHub Appの App IDを設定しておきます
+        private-key: ${{ secrets.GH_APP_PRIVATE_KEY }} # Repository SecretにGitHub AppのPrivate keyを設定しておきます
+        owner: ${{ github.repository_owner }}
+    
+    - name: Terraform Init
+      run: terraform init
+
+    - name: Terraform Plan
+      env:
+        GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+      run: terraform plan -out=tfplan
+
+    - name: Terraform Apply
+      env:
+        GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+      run: terraform apply -auto-approve
+
+    - name: Output Repository URL
+      run: terraform output repository_url
+
+    - name: Cleanup
+      if: always()
+      run: |
+        rm -f github_app_key.pem
+        rm -f tfplan
