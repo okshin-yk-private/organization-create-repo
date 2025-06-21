@@ -10,8 +10,8 @@ variable "repository_description" {
   default     = "test"
 }
 
-variable "github_token" {
-  description = "GitHub token for authentication"
-  type        = string
-  sensitive   = true
-}
+# variable "github_token" {
+#   description = "GitHub token for authentication"
+#   type        = string
+#   sensitive   = true
+# }
