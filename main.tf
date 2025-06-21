@@ -2,7 +2,7 @@ resource "github_repository" "repo" {
   name        = var.repository_name
   description = var.repository_description
   
-  visibility = "private"
+  visibility = "public"
   
   has_issues      = true
   has_projects    = true
@@ -27,10 +27,6 @@ resource "github_branch_protection" "main" {
   pattern       = "main"
   
   # プルリクエストを要求
-  required_status_checks {
-    strict = false
-  }
-  
   required_pull_request_reviews {
     required_approving_review_count = 0
     dismiss_stale_reviews = false
