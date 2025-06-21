@@ -22,35 +22,19 @@ resource "github_repository" "repo" {
   vulnerability_alerts = true
 }
 
-resource "github_repository_ruleset" "main" {
-  repository = github_repository.repo.name
-  name       = "main-branch-protection"
-  target     = "branch"
-  enforcement = "active"
+resource "github_branch_protection" "main" {
+  repository_id = github_repository.repo.node_id
+  pattern       = "main"
   
-  conditions {
-    ref_name {
-      include = ["~DEFAULT_BRANCH"]
-      exclude = []
-    }
+  # プルリクエストを要求
+  required_status_checks {
+    strict = false
   }
   
-  rules {
-    # プルリクエストを要求
-    pull_request {
-      required_approving_review_count = 0
-      dismiss_stale_reviews_on_push = false
-      require_code_owner_review = false
-      require_last_push_approval = false
-    }
-    
-    # 直接プッシュを制限
-    creation = false
-    deletion = false
-    non_fast_forward = false
-    required_linear_history = false
-    required_signatures = false
-    update = false
+  required_pull_request_reviews {
+    required_approving_review_count = 0
+    dismiss_stale_reviews = false
+    require_code_owner_reviews = false
   }
 }
 
