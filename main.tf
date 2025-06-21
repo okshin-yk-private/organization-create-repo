@@ -22,6 +22,16 @@ resource "github_repository" "repo" {
   vulnerability_alerts = true
 }
 
+resource "github_branch_protection" "main" {
+  repository_id = github_repository.repo.node_id
+  pattern       = "main"
+  
+  # プッシュ制限を有効化
+  restrict_pushes {
+    push_allowances = []
+  }
+}
+
 output "repository_url" {
   description = "The URL of the created repository"
   value       = github_repository.repo.html_url
