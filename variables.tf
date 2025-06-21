@@ -15,8 +15,3 @@ variable "github_token" {
   type        = string
   sensitive   = true
 }
-
-variable "github_owner" {
-  description = "GitHub owner (organization or user)"
-  type        = string
-}
