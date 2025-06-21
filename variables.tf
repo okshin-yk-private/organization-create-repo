@@ -10,20 +10,8 @@ variable "repository_description" {
   default     = "test"
 }
 
-variable "github_app_id" {
-  description = "GitHub App ID for authentication"
-  type        = string
-  sensitive   = true
-}
-
-variable "github_app_installation_id" {
-  description = "GitHub App Installation ID"
-  type        = string
-  sensitive   = true
-}
-
-variable "github_app_pem_file" {
-  description = "GitHub App Private Key (PEM content)"
+variable "github_token" {
+  description = "GitHub token for authentication"
   type        = string
   sensitive   = true
 }
