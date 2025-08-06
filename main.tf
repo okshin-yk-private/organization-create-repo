@@ -1,13 +1,15 @@
-resource "github_repository" "repo" {
-  name        = var.repository_name
-  description = var.repository_description
+resource "github_repository" "repos" {
+  for_each = var.repositories
   
-  visibility = "public"
+  name        = each.key
+  description = each.value.description
   
-  has_issues      = true
-  has_projects    = true
-  has_wiki        = true
-  has_downloads   = true
+  visibility = each.value.visibility
+  
+  has_issues      = each.value.has_issues
+  has_projects    = each.value.has_projects
+  has_wiki        = each.value.has_wiki
+  has_downloads   = each.value.has_downloads
   
   auto_init          = true
   gitignore_template = "VisualStudio"
@@ -23,7 +25,9 @@ resource "github_repository" "repo" {
 }
 
 resource "github_branch_protection" "main" {
-  repository_id = github_repository.repo.node_id
+  for_each = github_repository.repos
+  
+  repository_id = each.value.node_id
   pattern       = "main"
   
   # プルリクエストを要求
@@ -34,17 +38,17 @@ resource "github_branch_protection" "main" {
   }
 }
 
-output "repository_url" {
-  description = "The URL of the created repository"
-  value       = github_repository.repo.html_url
+output "repository_urls" {
+  description = "The URLs of the created repositories"
+  value       = { for k, v in github_repository.repos : k => v.html_url }
 }
 
-output "repository_name" {
-  description = "The name of the created repository"
-  value       = github_repository.repo.name
+output "repository_names" {
+  description = "The names of the created repositories"
+  value       = { for k, v in github_repository.repos : k => v.name }
 }
 
-output "repository_full_name" {
-  description = "The full name of the repository (owner/name)"
-  value       = github_repository.repo.full_name
+output "repository_full_names" {
+  description = "The full names of the repositories (owner/name)"
+  value       = { for k, v in github_repository.repos : k => v.full_name }
 }
