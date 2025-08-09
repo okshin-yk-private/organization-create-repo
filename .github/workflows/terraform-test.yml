@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - '**.tf'
+      - 'terraform/**/*.tf'
       - '.github/workflows/terraform-test.yml'
   workflow_dispatch:
 
@@ -61,24 +61,27 @@ jobs:
         echo "TEST_REPO_NAME=$TEST_REPO_NAME" >> $GITHUB_ENV
         
         # テスト用設定ファイルの作成
-        cp terraform.tfvars.example terraform.tfvars
-        sed -i "s/BRANCH_STRATEGY_PLACEHOLDER/${{ matrix.branch_strategy }}/g" terraform.tfvars
-        sed -i "s/test-repo-${{ matrix.branch_strategy }}/$TEST_REPO_NAME/g" terraform.tfvars
+        cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+        sed -i "s/BRANCH_STRATEGY_PLACEHOLDER/${{ matrix.branch_strategy }}/g" terraform/terraform.tfvars
+        sed -i "s/test-repo-${{ matrix.branch_strategy }}/$TEST_REPO_NAME/g" terraform/terraform.tfvars
         
         echo "📋 テスト設定:"
-        cat terraform.tfvars
+        cat terraform/terraform.tfvars
 
     - name: Terraform Init
+      working-directory: terraform
       run: |
         echo "🚀 Terraformを初期化中..."
         terraform init -upgrade
 
     - name: Terraform Validate
+      working-directory: terraform
       run: |
         echo "✅ Terraform設定を検証中..."
         terraform validate
 
     - name: Terraform Plan
+      working-directory: terraform
       run: |
         echo "📋 ${{ matrix.branch_strategy }}戦略でTerraform Planを実行中..."
         terraform plan -detailed-exitcode

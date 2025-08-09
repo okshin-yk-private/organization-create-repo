@@ -130,7 +130,7 @@ jobs:
         fi
         
         # 動的なbackend.tfファイルの作成
-        cat > backend.tf << 'EOF'
+        cat > terraform/backend.tf << 'EOF'
         terraform {
           backend "s3" {
             bucket = "yk-private-terraform"
@@ -141,10 +141,10 @@ jobs:
         EOF
         
         echo "📋 生成されたbackend.tf:"
-        cat backend.tf
+        cat terraform/backend.tf
         
         # 動的なterraform.tfvarsファイルの作成
-        cat > terraform.tfvars << EOF
+        cat > terraform/terraform.tfvars << EOF
         repository = {
           name = "${{ inputs.repository_name }}"
           description = "Repository created via GitHub Actions"
@@ -153,16 +153,19 @@ jobs:
         EOF
         
         echo "📋 生成されたterraform.tfvars:"
-        cat terraform.tfvars
+        cat terraform/terraform.tfvars
     
     - name: Terraform Init
+      working-directory: terraform
       run: terraform init
 
     - name: Terraform Plan
+      working-directory: terraform
       run: terraform plan -out=tfplan -detailed-exitcode
 
     - name: Terraform Apply
       id: apply
+      working-directory: terraform
       run: |
         echo "🚀 Terraformの変更を適用中..."
         if terraform apply -auto-approve tfplan; then
@@ -196,6 +199,7 @@ jobs:
         else
           echo "📊 Terraform出力結果:"
           
+          cd terraform
           if terraform output repository_url > /dev/null 2>&1; then
             echo "🔗 リポジトリURL:"
             terraform output repository_url
@@ -242,6 +246,7 @@ jobs:
         else
           echo "📝 Terraform関連のエラーが発生しました:"
           
+          cd terraform
           echo "📝 Terraform状態:"
           terraform show -no-color || echo "状態情報がありません"
           

@@ -12,7 +12,7 @@ variable "repository" {
   })
 
   validation {
-    condition = contains(["gitflow", "github-flow"], var.repository.branch_strategy)
+    condition     = contains(["gitflow", "github-flow"], var.repository.branch_strategy)
     error_message = "branch_strategy must be either 'gitflow' or 'github-flow'."
   }
 }
