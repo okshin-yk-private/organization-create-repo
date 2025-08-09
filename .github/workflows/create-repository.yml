@@ -156,13 +156,23 @@ jobs:
 
     - name: Terraform Plan
       run: |
+        set -o pipefail  # パイプラインエラーを正しく捕捉
+        
         echo "📋 Terraform Planを実行中..."
+        
+        # terraform plan を実行し、exit codeを保存
+        set +e  # 一時的にエラー時の即座終了を無効化
         terraform plan -out=tfplan -detailed-exitcode
         PLAN_EXIT_CODE=$?
+        set -e  # エラー時の即座終了を再度有効化
+        
+        echo "📊 Plan exit code: $PLAN_EXIT_CODE"
         
         if [[ $PLAN_EXIT_CODE -eq 1 ]]; then
           echo "❌ Terraform planが失敗しました"
           exit 1
+        elif [[ $PLAN_EXIT_CODE -eq 0 ]]; then
+          echo "✅ 変更はありません"
         elif [[ $PLAN_EXIT_CODE -eq 2 ]]; then
           echo "📝 変更を検出 - 安全性チェックを実行します"
           
@@ -196,7 +206,8 @@ jobs:
           
           echo "✅ 安全性チェック完了 - プランを適用します"
         else
-          echo "✅ 変更はありません"
+          echo "⚠️ 予期しないexit code: $PLAN_EXIT_CODE"
+          exit 1
         fi
 
     - name: Terraform Apply
