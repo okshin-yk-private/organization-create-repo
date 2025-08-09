@@ -17,6 +17,12 @@ variable "repository" {
   }
 }
 
+variable "readme_content" {
+  description = "README.mdファイルの内容（指定しない場合はデフォルトのREADMEが作成される）"
+  type        = string
+  default     = null
+}
+
 variable "branch_protection_settings" {
   description = "ブランチ保護設定"
   type = object({

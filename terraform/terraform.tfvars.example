@@ -7,6 +7,27 @@ repository = {
   branch_strategy = "BRANCH_STRATEGY_PLACEHOLDER"
 }
 
+# カスタムREADME.md内容（オプション）
+# 指定しない場合はデフォルトのREADMEが作成される
+readme_content = <<EOF
+# Test Repository
+
+これは**BRANCH_STRATEGY_PLACEHOLDER**戦略を使用したテストリポジトリです。
+
+## ブランチ戦略
+
+- ブランチ戦略: BRANCH_STRATEGY_PLACEHOLDER
+
+## 使用方法
+
+このリポジトリはTerraformで自動作成されました。
+
+## 注意事項
+
+- これはテスト用のリポジトリです
+- 本番環境では使用しないでください
+EOF
+
 # ブランチ保護設定（オプション）
 branch_protection_settings = {
   required_reviews           = 1
