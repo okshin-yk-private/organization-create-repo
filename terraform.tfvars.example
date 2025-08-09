@@ -1,11 +1,10 @@
 # テスト用のTerraform変数設定ファイル
 # このファイルはGitHub Actions マトリックステストで使用されます
 
-repositories = {
-  "test-repo-BRANCH_STRATEGY_PLACEHOLDER" = {
-    description = "Test repository for BRANCH_STRATEGY_PLACEHOLDER strategy"
-    branch_strategy = "BRANCH_STRATEGY_PLACEHOLDER"
-  }
+repository = {
+  name = "test-repo-BRANCH_STRATEGY_PLACEHOLDER"
+  description = "Test repository for BRANCH_STRATEGY_PLACEHOLDER strategy"  
+  branch_strategy = "BRANCH_STRATEGY_PLACEHOLDER"
 }
 
 # ブランチ保護設定（オプション）
