@@ -11,7 +11,7 @@ locals {
     }
   }
 
-  # フラット化されたブランチリスト
+  # ブランチリスト
   branches = [
     for branch_name, branch_config in local.branch_config.branches : {
       branch_name   = branch_name
@@ -48,7 +48,6 @@ resource "github_repository" "repo" {
 
   auto_init          = true
   gitignore_template = "VisualStudio"
-  license_template   = "mit"
 
   allow_merge_commit     = true
   allow_squash_merge     = true
@@ -57,6 +56,22 @@ resource "github_repository" "repo" {
   delete_branch_on_merge = true
 
   vulnerability_alerts = true
+}
+
+# カスタムREADME.mdファイルの作成（readme_contentが指定された場合のみ）
+resource "github_repository_file" "readme" {
+  count = var.readme_content != null ? 1 : 0
+
+  repository          = github_repository.repo.name
+  branch              = "main"
+  file                = "README.md"
+  content             = var.readme_content
+  commit_message      = "Add custom README.md"
+  commit_author       = "Terraform"
+  commit_email        = "terraform@example.com"
+  overwrite_on_create = true
+
+  depends_on = [github_repository.repo]
 }
 
 # ブランチ作成（mainブランチ以外）
