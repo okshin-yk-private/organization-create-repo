@@ -112,7 +112,7 @@ jobs:
       run: |
         echo "📊 Terraform出力結果:"
         
-        if terraform output repository_urls > /dev/null 2>&1; then
+        if terraform output repository_url > /dev/null 2>&1; then
           echo "🔗 リポジトリURL:"
           terraform output repository_url
           
