@@ -15,6 +15,11 @@ on:
           - gitflow
           - github-flow
         default: gitflow
+      update_existing:
+        description: '既存リポジトリの更新を許可（デフォルト: false = 新規作成のみ）'
+        required: false
+        type: boolean
+        default: false
       debug_mode:
         description: 'Enable debug output'
         required: false
@@ -56,6 +61,62 @@ jobs:
     - name: Set GitHub Token
       run: echo "GITHUB_TOKEN=${{ steps.generate_token.outputs.token }}" >> $GITHUB_ENV
     
+    - name: Check Existing Repository
+      id: check_repo
+      run: |
+        REPO_NAME="${{ inputs.repository_name }}"
+        OWNER="${{ github.repository_owner }}"
+        
+        echo "## 🔍 リポジトリ確認" >> $GITHUB_STEP_SUMMARY
+        
+        if gh repo view "${OWNER}/${REPO_NAME}" >/dev/null 2>&1; then
+          echo "exists=true" >> $GITHUB_OUTPUT
+          echo "### ⚠️ 既存リポジトリを検出" >> $GITHUB_STEP_SUMMARY
+          echo "リポジトリ \`${REPO_NAME}\` は既に存在します。" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # 既存リポジトリの情報を取得
+          echo "**リポジトリ情報:**" >> $GITHUB_STEP_SUMMARY
+          gh repo view "${OWNER}/${REPO_NAME}" --json createdAt,description,isPrivate,defaultBranchRef \
+            --jq '"- 作成日: \(.createdAt)\n- 説明: \(.description // "なし")\n- 可視性: \(if .isPrivate then "Private" else "Public" end)\n- デフォルトブランチ: \(.defaultBranchRef.name)"' \
+            >> $GITHUB_STEP_SUMMARY
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+          echo "### ✅ 新規リポジトリを作成します" >> $GITHUB_STEP_SUMMARY
+          echo "リポジトリ \`${REPO_NAME}\` を新規作成します。" >> $GITHUB_STEP_SUMMARY
+        fi
+    
+    - name: Validate Operation Mode
+      run: |
+        if [[ "${{ steps.check_repo.outputs.exists }}" == "true" ]]; then
+          if [[ "${{ inputs.update_existing }}" != "true" ]]; then
+            echo "## ❌ エラー: 既存リポジトリが存在します" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "リポジトリ \`${{ inputs.repository_name }}\` は既に存在します。" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 対処方法:" >> $GITHUB_STEP_SUMMARY
+            echo "1. 別のリポジトリ名を使用する" >> $GITHUB_STEP_SUMMARY
+            echo "2. 既存リポジトリの更新を許可する場合は \`update_existing\` を \`true\` に設定" >> $GITHUB_STEP_SUMMARY
+            echo "3. 既存リポジトリを手動で削除してから再実行" >> $GITHUB_STEP_SUMMARY
+            
+            echo "❌ 既存リポジトリが存在するため処理を中止します"
+            echo "update_existing パラメータを true に設定すると更新モードで実行できます"
+            exit 1
+          else
+            echo "## ⚠️ 更新モード" >> $GITHUB_STEP_SUMMARY
+            echo "既存リポジトリ \`${{ inputs.repository_name }}\` を更新します。" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 注意事項:" >> $GITHUB_STEP_SUMMARY
+            echo "- ブランチ戦略の変更により一部ブランチが再作成される可能性があります" >> $GITHUB_STEP_SUMMARY
+            echo "- ブランチ保護ルールが更新されます" >> $GITHUB_STEP_SUMMARY
+            echo "- リポジトリ本体の削除は実行されません" >> $GITHUB_STEP_SUMMARY
+            
+            echo "⚠️ 更新モードで実行します"
+          fi
+        else
+          echo "✅ 新規作成モードで実行します"
+        fi
+    
     - name: Setup Dynamic Configuration
       run: |
         # デバッグモードの設定
@@ -63,6 +124,20 @@ jobs:
           echo "TF_LOG=DEBUG" >> $GITHUB_ENV
           echo "🐛 デバッグモードを有効化しました"
         fi
+        
+        # 動的なbackend.tfファイルの作成
+        cat > backend.tf << 'EOF'
+        terraform {
+          backend "s3" {
+            bucket = "yk-private-terraform"
+            key    = "github/repos/${{ inputs.repository_name }}/terraform.tfstate"
+            region = "ap-northeast-1"
+          }
+        }
+        EOF
+        
+        echo "📋 生成されたbackend.tf:"
+        cat backend.tf
         
         # 動的なterraform.tfvarsファイルの作成
         cat > terraform.tfvars << EOF
@@ -89,7 +164,37 @@ jobs:
           echo "❌ Terraform planが失敗しました"
           exit 1
         elif [[ $PLAN_EXIT_CODE -eq 2 ]]; then
-          echo "📝 変更を検出 - プランを適用します"
+          echo "📝 変更を検出 - 安全性チェックを実行します"
+          
+          # 削除操作の検出
+          echo "🔍 削除操作をチェック中..."
+          
+          if [[ "${{ inputs.update_existing }}" != "true" ]]; then
+            # 新規作成モード: 削除操作を完全に禁止
+            if terraform show -json tfplan | jq '.resource_changes[] | select(.change.actions | contains(["delete"]))' | grep -q .; then
+              echo "❌ エラー: 削除操作が検出されました（新規作成モード）"
+              echo "削除される予定のリソース:"
+              terraform show -json tfplan | jq -r '.resource_changes[] | select(.change.actions | contains(["delete"])) | "  - \(.type).\(.name) (アクション: \(.change.actions | join(",")))"'
+              echo ""
+              echo "新規作成モードでは削除操作は許可されていません。"
+              exit 1
+            fi
+          else
+            # 更新モード: リポジトリ本体の削除のみ禁止
+            if terraform show -json tfplan | jq '.resource_changes[] | select(.type == "github_repository" and .change.actions | contains(["delete"]))' | grep -q .; then
+              echo "❌ エラー: リポジトリ本体の削除は許可されていません"
+              echo "更新モードでもリポジトリ本体の削除は実行できません。"
+              exit 1
+            fi
+            
+            # 削除される予定のリソースを警告表示
+            if terraform show -json tfplan | jq '.resource_changes[] | select(.change.actions | contains(["delete"]))' | grep -q .; then
+              echo "⚠️ 警告: 以下のリソースが削除または置換されます:"
+              terraform show -json tfplan | jq -r '.resource_changes[] | select(.change.actions | contains(["delete"])) | "  - \(.type).\(.name) (アクション: \(.change.actions | join(",")))"'
+            fi
+          fi
+          
+          echo "✅ 安全性チェック完了 - プランを適用します"
         else
           echo "✅ 変更はありません"
         fi
