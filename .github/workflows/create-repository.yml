@@ -16,7 +16,7 @@ on:
           - github-flow
         default: gitflow
       update_existing:
-        description: '既存リポジトリの更新を許可（デフォルト: false = 新規作成のみ）'
+        description: '既存リポジトリの更新を許可する場合はチェックを入れてください'
         required: false
         type: boolean
         default: false
