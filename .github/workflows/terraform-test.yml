@@ -35,8 +35,10 @@ permissions:
 jobs:
   terraform-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15  # ジョブ全体のタイムアウト設定
     strategy:
       fail-fast: false
+      max-parallel: 1  # 並列実行を制限してリソース競合を防ぐ
       matrix:
         branch_strategy: 
           - ${{ github.event.inputs.branch_strategy == 'both' && 'gitflow' || github.event.inputs.branch_strategy == 'gitflow' && 'gitflow' || github.event.inputs.branch_strategy == 'github-flow' && 'github-flow' || 'gitflow' }}
@@ -46,12 +48,16 @@ jobs:
     
     env:
       TF_VAR_test_mode: true
+      TF_HTTP_MAX_RETRIES: "3"  # Terraform HTTPリトライ回数
+      TF_HTTP_RETRY_WAIT_MIN: "1"  # 最小待機時間(秒)
+      TF_HTTP_RETRY_WAIT_MAX: "30"  # 最大待機時間(秒)
     
     steps:
     - name: Checkout
       uses: actions/checkout@v4
 
     - name: Configure AWS credentials
+      timeout-minutes: 2  # AWS認証のタイムアウト
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: ${{ secrets.ROLE_ARN }}
@@ -62,9 +68,11 @@ jobs:
       uses: hashicorp/setup-terraform@v3
       with:
         terraform_version: "1.11.0"
+        terraform_wrapper: false  # wrapperを無効化して高速化
 
     - name: Generate GitHub App Token
       id: generate_token
+      timeout-minutes: 2  # GitHub App Token生成のタイムアウト
       uses: actions/create-github-app-token@v1
       with:
         app-id: ${{ secrets.GH_APP_APP_ID }}
@@ -75,10 +83,16 @@ jobs:
       run: echo "GITHUB_TOKEN=${{ steps.generate_token.outputs.token }}" >> $GITHUB_ENV
 
     - name: Setup Test Environment
+      timeout-minutes: 2  # 環境設定のタイムアウト
       run: |
         echo "🧪 ${{ matrix.branch_strategy }}戦略のテスト環境を設定中"
         
-        # テスト用設定ファイルの作成
+        # テスト用設定ファイルの作成（エラーハンドリング付き）
+        if [[ ! -f terraform.tfvars.example ]]; then
+          echo "❌ terraform.tfvars.exampleファイルが見つかりません"
+          exit 1
+        fi
+        
         cp terraform.tfvars.example terraform.tfvars
         sed -i "s/BRANCH_STRATEGY_PLACEHOLDER/${{ matrix.branch_strategy }}/g" terraform.tfvars
         
@@ -92,9 +106,11 @@ jobs:
         fi
 
     - name: Terraform Init
+      timeout-minutes: 5  # terraform initのタイムアウト（プロバイダーダウンロード考慮）
       run: |
         echo "🚀 Terraformを初期化中..."
-        terraform init
+        # HTTP_PROXY設定でダウンロードを高速化
+        terraform init -upgrade
 
     - name: Terraform Validate
       id: validate
@@ -111,13 +127,24 @@ jobs:
 
     - name: Terraform Plan
       id: plan
+      timeout-minutes: 8  # terraform planのタイムアウト（API呼び出し考慮）
       if: inputs.test_mode != 'validate-only'
       run: |
         echo "📋 ${{ matrix.branch_strategy }}戦略でTerraform Planを実行中..."
         
-        # プランの実行
-        terraform plan -out=tfplan-${{ matrix.branch_strategy }} -detailed-exitcode > plan-output.log 2>&1
-        PLAN_EXIT_CODE=$?
+        # プランの実行（リトライ機構付き）
+        for i in {1..3}; do
+          if terraform plan -out=tfplan-${{ matrix.branch_strategy }} -detailed-exitcode > plan-output.log 2>&1; then
+            PLAN_EXIT_CODE=$?
+            break
+          elif [[ $i -eq 3 ]]; then
+            echo "❌ 3回のリトライ後も失敗"
+            PLAN_EXIT_CODE=1
+          else
+            echo "⚠️ リトライ $i/3: 30秒待機中..."
+            sleep 30
+          fi
+        done
         
         echo "plan_exit_code=$PLAN_EXIT_CODE" >> $GITHUB_OUTPUT
         
@@ -165,10 +192,12 @@ jobs:
   test-results:
     needs: terraform-test
     runs-on: ubuntu-latest
+    timeout-minutes: 5  # 結果集約のタイムアウト
     if: always()
     steps:
     - name: Download Plan Artifacts
       if: needs.terraform-test.result != 'failure'
+      timeout-minutes: 3  # artifactダウンロードのタイムアウト
       uses: actions/download-artifact@v4
       with:
         pattern: terraform-plans-*
