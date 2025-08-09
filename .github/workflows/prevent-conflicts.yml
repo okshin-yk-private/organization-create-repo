@@ -1,0 +1,50 @@
+name: Prevent Merge Conflicts
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  schedule:
+    - cron: '0 8 * * *'  # 毎日朝8時にチェック
+
+jobs:
+  conflict-prevention:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Check for potential conflicts
+      run: |
+        echo "🔍 潜在的なコンフリクトをチェック中..."
+        
+        # mainとの差分をチェック
+        if git merge-base --is-ancestor origin/main HEAD; then
+          echo "✅ ブランチは最新のmainから作成されています"
+        else
+          echo "⚠️ ブランチがmainから遅れています"
+          echo "Files that may conflict:"
+          git diff --name-only origin/main...HEAD
+          
+          # 自動リベース提案
+          echo "::warning::このブランチはmainと同期が必要です。git rebase origin/main を実行してください。"
+        fi
+
+    - name: Format check
+      run: |
+        echo "📝 フォーマットチェック中..."
+        
+        # Terraformフォーマットチェック
+        if command -v terraform >/dev/null 2>&1; then
+          if ! terraform fmt -check=true -diff=true; then
+            echo "::warning::Terraformファイルのフォーマットが不正です。terraform fmt で修正してください。"
+          fi
+        fi
+
+    - name: Report Status
+      run: |
+        echo "📊 ブランチ状態レポート:"
+        echo "- ベースブランチ: ${{ github.base_ref }}"  
+        echo "- 現在のブランチ: ${{ github.head_ref }}"
+        echo "- 変更ファイル数: $(git diff --name-only origin/${{ github.base_ref }}...HEAD | wc -l)"

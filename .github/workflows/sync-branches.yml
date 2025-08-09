@@ -1,0 +1,53 @@
+name: Auto Branch Sync
+
+on:
+  schedule:
+    - cron: '0 9 * * *'  # 毎日朝9時にmainブランチと同期
+  workflow_dispatch:      # 手動実行も可能
+
+jobs:
+  sync-feature-branches:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # 全履歴を取得
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Setup Git
+      run: |
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+
+    - name: Sync feature branches with main
+      run: |
+        echo "🔄 アクティブなブランチをmainと同期中..."
+        
+        # リモートブランチ一覧取得
+        git branch -r | grep -E "(feature|develop)" | sed 's/origin\///' | while read branch; do
+          echo "🌿 $branch をチェック中..."
+          
+          # ブランチをチェックアウト
+          git checkout "$branch" 2>/dev/null || continue
+          
+          # mainとの差分をチェック  
+          if git diff --quiet "origin/main"; then
+            echo "✅ $branch は最新です"
+          else
+            echo "🔄 $branch をmainと同期中..."
+            
+            # コンフリクトがあるかチェック
+            if git merge-base --is-ancestor "origin/main" HEAD; then
+              echo "📈 Fast-forward可能"
+              git merge "origin/main"
+              git push origin "$branch"
+            else
+              echo "⚠️ $branch にはコンフリクトが予想されます - 手動解決が必要"
+              # Issueを作成してアラート
+              gh issue create --title "Branch Sync Alert: $branch" \
+                --body "ブランチ $branch でコンフリクトが検出されました。手動でのrebaseまたはmergeが必要です。" \
+                --label "sync-alert" || true
+            fi
+          fi
+        done
