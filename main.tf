@@ -38,24 +38,24 @@ locals {
 resource "github_repository" "repo" {
   name        = var.repository.name
   description = var.repository.description
-
+  
   visibility = var.repository.visibility
-
-  has_issues    = var.repository.has_issues
-  has_projects  = var.repository.has_projects
-  has_wiki      = var.repository.has_wiki
-  has_downloads = var.repository.has_downloads
-
+  
+  has_issues      = var.repository.has_issues
+  has_projects    = var.repository.has_projects
+  has_wiki        = var.repository.has_wiki
+  has_downloads   = var.repository.has_downloads
+  
   auto_init          = true
   gitignore_template = "VisualStudio"
   license_template   = "mit"
-
+  
   allow_merge_commit     = true
   allow_squash_merge     = true
   allow_rebase_merge     = true
   allow_auto_merge       = false
   delete_branch_on_merge = true
-
+  
   vulnerability_alerts = true
 }
 
@@ -65,28 +65,28 @@ resource "github_branch" "branches" {
     for branch in local.branches : branch.branch_name => branch
     if branch.branch_name != "main" && branch.source_branch != null
   }
-
+  
   repository    = github_repository.repo.name
   branch        = each.value.branch_name
   source_branch = each.value.source_branch
-
+  
   depends_on = [github_repository.repo]
 }
 
 # 動的ブランチ保護ルール
 resource "github_branch_protection" "protection" {
   for_each = local.protection_rules
-
+  
   repository_id = github_repository.repo.node_id
-  pattern       = each.key
-
+  pattern       = each.value.branch_name
+  
   # プルリクエストレビュー要求
   required_pull_request_reviews {
     required_approving_review_count = each.value.required_approving_review_count
-    dismiss_stale_reviews           = each.value.dismiss_stale_reviews
-    require_code_owner_reviews      = each.value.require_code_owner_reviews
+    dismiss_stale_reviews          = each.value.dismiss_stale_reviews
+    require_code_owner_reviews     = each.value.require_code_owner_reviews
   }
-
+  
   # ステータスチェック要求（設定されている場合）
   dynamic "required_status_checks" {
     for_each = length(each.value.required_status_checks) > 0 ? [1] : []
@@ -95,14 +95,14 @@ resource "github_branch_protection" "protection" {
       contexts = each.value.required_status_checks
     }
   }
-
+  
   # 管理者への強制適用
   enforce_admins = each.value.enforce_admins
-
+  
   # プッシュの制限（直接プッシュを防ぐ）
   allows_deletions    = false
   allows_force_pushes = false
-
+  
   depends_on = [
     github_repository.repo,
     github_branch.branches
@@ -125,7 +125,7 @@ output "repository_full_name" {
 }
 
 output "repository_branches" {
-  description = "リポジトリのブランチ戦略とブランチ情報"
+  description = "ブランチ戦略とブランチ情報"
   value = {
     strategy = local.branch_config.strategy
     branches = keys(local.branch_config.branches)
@@ -140,8 +140,8 @@ output "created_branches" {
   description = "実際に作成されたブランチの詳細情報"
   value = {
     for k, v in github_branch.branches : k => {
-      repository    = v.repository
-      branch_name   = v.branch
+      repository = v.repository
+      branch_name = v.branch
       source_branch = v.source_branch
     }
   }
@@ -151,10 +151,10 @@ output "branch_protection_summary" {
   description = "ブランチ保護ルールのサマリー"
   value = {
     for k, v in local.protection_rules : k => {
-      branch                  = v.branch_name
-      required_reviews        = v.required_approving_review_count
-      dismiss_stale_reviews   = v.dismiss_stale_reviews
-      enforce_admins          = v.enforce_admins
+      branch = v.branch_name
+      required_reviews = v.required_approving_review_count
+      dismiss_stale_reviews = v.dismiss_stale_reviews
+      enforce_admins = v.enforce_admins
       allowed_source_branches = v.from_branches
     }
   }
