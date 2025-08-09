@@ -138,9 +138,9 @@ jobs:
 
     - name: Upload Plan Artifacts
       if: steps.plan.outputs.plan_exit_code != '1' && inputs.test_mode != 'validate-only'
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: terraform-plans
+        name: terraform-plans-${{ matrix.branch_strategy }}
         path: |
           tfplan-${{ matrix.branch_strategy }}
           plan-${{ matrix.branch_strategy }}.json
@@ -169,10 +169,11 @@ jobs:
     steps:
     - name: Download Plan Artifacts
       if: needs.terraform-test.result != 'failure'
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
-        name: terraform-plans
+        pattern: terraform-plans-*
         path: ./plans
+        merge-multiple: true
 
     - name: Summarize Test Results
       run: |
