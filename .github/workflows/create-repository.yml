@@ -156,17 +156,58 @@ jobs:
 
     - name: Terraform Plan
       run: |
+        set -o pipefail  # パイプラインエラーを正しく捕捉
+        
         echo "📋 Terraform Planを実行中..."
+        
+        # terraform plan を実行し、exit codeを保存
+        set +e  # 一時的にエラー時の即座終了を無効化
         terraform plan -out=tfplan -detailed-exitcode
         PLAN_EXIT_CODE=$?
+        set -e  # エラー時の即座終了を再度有効化
+        
+        echo "📊 Plan exit code: $PLAN_EXIT_CODE"
         
         if [[ $PLAN_EXIT_CODE -eq 1 ]]; then
           echo "❌ Terraform planが失敗しました"
           exit 1
-        elif [[ $PLAN_EXIT_CODE -eq 2 ]]; then
-          echo "📝 変更を検出 - プランを適用します"
-        else
+        elif [[ $PLAN_EXIT_CODE -eq 0 ]]; then
           echo "✅ 変更はありません"
+        elif [[ $PLAN_EXIT_CODE -eq 2 ]]; then
+          echo "📝 変更を検出 - 安全性チェックを実行します"
+          
+          # 削除操作の検出
+          echo "🔍 削除操作をチェック中..."
+          
+          if [[ "${{ inputs.update_existing }}" != "true" ]]; then
+            # 新規作成モード: 削除操作を完全に禁止
+            if terraform show -json tfplan | jq '.resource_changes[] | select(.change.actions | contains(["delete"]))' | grep -q .; then
+              echo "❌ エラー: 削除操作が検出されました（新規作成モード）"
+              echo "削除される予定のリソース:"
+              terraform show -json tfplan | jq -r '.resource_changes[] | select(.change.actions | contains(["delete"])) | "  - \(.type).\(.name) (アクション: \(.change.actions | join(",")))"'
+              echo ""
+              echo "新規作成モードでは削除操作は許可されていません。"
+              exit 1
+            fi
+          else
+            # 更新モード: リポジトリ本体の削除のみ禁止
+            if terraform show -json tfplan | jq '.resource_changes[] | select(.type == "github_repository" and .change.actions | contains(["delete"]))' | grep -q .; then
+              echo "❌ エラー: リポジトリ本体の削除は許可されていません"
+              echo "更新モードでもリポジトリ本体の削除は実行できません。"
+              exit 1
+            fi
+            
+            # 削除される予定のリソースを警告表示
+            if terraform show -json tfplan | jq '.resource_changes[] | select(.change.actions | contains(["delete"]))' | grep -q .; then
+              echo "⚠️ 警告: 以下のリソースが削除または置換されます:"
+              terraform show -json tfplan | jq -r '.resource_changes[] | select(.change.actions | contains(["delete"])) | "  - \(.type).\(.name) (アクション: \(.change.actions | join(",")))"'
+            fi
+          fi
+          
+          echo "✅ 安全性チェック完了 - プランを適用します"
+        else
+          echo "⚠️ 予期しないexit code: $PLAN_EXIT_CODE"
+          exit 1
         fi
 
     - name: Terraform Apply
