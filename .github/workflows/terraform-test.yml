@@ -35,10 +35,12 @@ permissions:
 jobs:
   terraform-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # ジョブ全体のタイムアウト設定
+
+    timeout-minutes: 25  # ジョブ全体のタイムアウト（クリーンアップ追加で延長）
     strategy:
       fail-fast: false
-      max-parallel: 1  # 並列実行を制限してリソース競合を防ぐ
+      max-parallel: 2  # 並列実行を少し増やしてパフォーマンス向上（リソース名ユニーク化により競合回避）
+
       matrix:
         branch_strategy: 
           - ${{ github.event.inputs.branch_strategy == 'both' && 'gitflow' || github.event.inputs.branch_strategy == 'gitflow' && 'gitflow' || github.event.inputs.branch_strategy == 'github-flow' && 'github-flow' || 'gitflow' }}
@@ -83,9 +85,14 @@ jobs:
       run: echo "GITHUB_TOKEN=${{ steps.generate_token.outputs.token }}" >> $GITHUB_ENV
 
     - name: Setup Test Environment
-      timeout-minutes: 2  # 環境設定のタイムアウト
+
+      timeout-minutes: 3  # 環境設定のタイムアウト（クリーンアップ追加のため延長）
       run: |
         echo "🧪 ${{ matrix.branch_strategy }}戦略のテスト環境を設定中"
+        
+        # ユニークなテスト用リポジトリ名を生成
+        TEST_REPO_NAME="test-${{ matrix.branch_strategy }}-${{ github.run_number }}-$(date +%s)"
+        echo "TEST_REPO_NAME=$TEST_REPO_NAME" >> $GITHUB_ENV
         
         # テスト用設定ファイルの作成（エラーハンドリング付き）
         if [[ ! -f terraform.tfvars.example ]]; then
@@ -95,6 +102,7 @@ jobs:
         
         cp terraform.tfvars.example terraform.tfvars
         sed -i "s/BRANCH_STRATEGY_PLACEHOLDER/${{ matrix.branch_strategy }}/g" terraform.tfvars
+        sed -i "s/test-repo-${{ matrix.branch_strategy }}/$TEST_REPO_NAME/g" terraform.tfvars
         
         echo "📋 テスト設定:"
         cat terraform.tfvars
@@ -132,16 +140,20 @@ jobs:
       run: |
         echo "📋 ${{ matrix.branch_strategy }}戦略でTerraform Planを実行中..."
         
-        # プランの実行（リトライ機構付き）
+        # プランの実行（修正されたリトライ機構付き）
         for i in {1..3}; do
-          if terraform plan -out=tfplan-${{ matrix.branch_strategy }} -detailed-exitcode > plan-output.log 2>&1; then
-            PLAN_EXIT_CODE=$?
+          terraform plan -out=tfplan-${{ matrix.branch_strategy }} -detailed-exitcode > plan-output.log 2>&1
+          PLAN_EXIT_CODE=$?
+          
+          if [[ $PLAN_EXIT_CODE -eq 0 || $PLAN_EXIT_CODE -eq 2 ]]; then
+            echo "✅ terraform planが成功しました（終了コード: $PLAN_EXIT_CODE）"
             break
           elif [[ $i -eq 3 ]]; then
-            echo "❌ 3回のリトライ後も失敗"
-            PLAN_EXIT_CODE=1
+            echo "❌ 3回のリトライ後も失敗（終了コード: $PLAN_EXIT_CODE）"
+            cat plan-output.log
           else
-            echo "⚠️ リトライ $i/3: 30秒待機中..."
+            echo "⚠️ リトライ $i/3: 30秒待機中...（終了コード: $PLAN_EXIT_CODE）"
+
             sleep 30
           fi
         done
