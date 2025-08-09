@@ -2,6 +2,25 @@ name: Create GitHub Repository
 
 on:
   workflow_dispatch:
+    inputs:
+      repository_name:
+        description: 'Repository name to create (or use default from variables)'
+        required: false
+        type: string
+      branch_strategy:
+        description: 'Branch strategy for the repository'
+        required: false
+        type: choice
+        options:
+          - default
+          - gitflow
+          - github-flow
+        default: default
+      debug_mode:
+        description: 'Enable debug output'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   id-token: write
@@ -38,20 +57,134 @@ jobs:
     - name: Set GitHub Token
       run: echo "GITHUB_TOKEN=${{ steps.generate_token.outputs.token }}" >> $GITHUB_ENV
     
+    - name: Setup Dynamic Configuration
+      run: |
+        # デバッグモードの設定
+        if [[ "${{ inputs.debug_mode }}" == "true" ]]; then
+          echo "TF_LOG=DEBUG" >> $GITHUB_ENV
+          echo "🐛 Debug mode enabled"
+        fi
+        
+        # 動的なterraform.tfvarsファイルの作成
+        cat > terraform.tfvars << EOF
+        repositories = {
+        EOF
+        
+        # リポジトリ名とブランチ戦略の設定
+        if [[ -n "${{ inputs.repository_name }}" && "${{ inputs.branch_strategy }}" != "default" ]]; then
+          # 入力パラメータが指定された場合
+          cat >> terraform.tfvars << EOF
+          "${{ inputs.repository_name }}" = {
+            description = "Repository created via GitHub Actions"
+            branch_strategy = "${{ inputs.branch_strategy }}"
+          }
+        EOF
+        else
+          # デフォルト設定を使用
+          cat >> terraform.tfvars << EOF
+          "github-test-1" = {
+            description = "Test repository 1"
+            branch_strategy = "gitflow"
+          }
+          "github-test-2" = {
+            description = "Test repository 2"  
+            branch_strategy = "github-flow"
+          }
+        EOF
+        fi
+        
+        cat >> terraform.tfvars << EOF
+        }
+        EOF
+        
+        echo "📋 Generated terraform.tfvars:"
+        cat terraform.tfvars
+    
     - name: Terraform Init
       run: terraform init
 
     - name: Terraform Plan
-      run: terraform plan -out=tfplan
+      run: |
+        echo "📋 Running Terraform Plan..."
+        terraform plan -out=tfplan -detailed-exitcode
+        PLAN_EXIT_CODE=$?
+        
+        if [[ $PLAN_EXIT_CODE -eq 1 ]]; then
+          echo "❌ Terraform plan failed"
+          exit 1
+        elif [[ $PLAN_EXIT_CODE -eq 2 ]]; then
+          echo "📝 Changes detected - plan will be applied"
+        else
+          echo "✅ No changes detected"
+        fi
 
     - name: Terraform Apply
-      run: terraform apply -auto-approve
+      id: apply
+      run: |
+        echo "🚀 Applying Terraform changes..."
+        if terraform apply -auto-approve tfplan; then
+          echo "✅ Terraform apply completed successfully"
+        else
+          echo "❌ Terraform apply failed"
+          echo "📊 Checking current state..."
+          terraform show
+          exit 1
+        fi
 
-    - name: Output Repository URL
-      run: terraform output repository_url
+    - name: Output Results
+      if: always()
+      run: |
+        echo "📊 Terraform Outputs:"
+        
+        if terraform output repository_urls > /dev/null 2>&1; then
+          echo "🔗 Repository URLs:"
+          terraform output repository_urls
+          
+          echo ""
+          echo "🌿 Branch Information:"
+          terraform output repository_branches
+          
+          echo ""
+          echo "🛡️ Protection Rules:"
+          terraform output branch_protection_summary
+          
+          if terraform output created_branches > /dev/null 2>&1; then
+            echo ""
+            echo "🆕 Created Branches:"
+            terraform output created_branches
+          fi
+        else
+          echo "⚠️ No outputs available - check for errors above"
+        fi
 
+    - name: Error Diagnosis
+      if: failure()
+      run: |
+        echo "🔍 Diagnosing failure..."
+        
+        echo "📝 Terraform State:"
+        terraform show -no-color || echo "No state available"
+        
+        echo ""
+        echo "📋 Terraform Configuration:"
+        echo "variables.tf:"
+        head -20 variables.tf
+        
+        echo ""
+        echo "terraform.tfvars:"
+        cat terraform.tfvars
+        
+        echo ""
+        echo "🔧 Provider Versions:"
+        terraform version
+        
+        echo ""
+        echo "📊 Resource Status:"
+        terraform state list || echo "No state available"
+    
     - name: Cleanup
       if: always()
       run: |
         rm -f github_app_key.pem
         rm -f tfplan
+        rm -f terraform.tfvars

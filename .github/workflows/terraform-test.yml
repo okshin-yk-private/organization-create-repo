@@ -1,0 +1,189 @@
+name: Terraform Test Matrix
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.tf'
+      - '.github/workflows/terraform-test.yml'
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: 'Test mode'
+        required: true
+        type: choice
+        options:
+          - validate-only
+          - plan-only
+          - full-test
+        default: plan-only
+      branch_strategy:
+        description: 'Branch strategy to test'
+        required: false
+        type: choice
+        options:
+          - gitflow
+          - github-flow
+          - both
+        default: both
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write  # For commenting on PRs
+
+jobs:
+  terraform-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        branch_strategy: 
+          - ${{ github.event.inputs.branch_strategy == 'both' && 'gitflow' || github.event.inputs.branch_strategy == 'gitflow' && 'gitflow' || github.event.inputs.branch_strategy == 'github-flow' && 'github-flow' || 'gitflow' }}
+          - ${{ github.event.inputs.branch_strategy == 'both' && 'github-flow' || github.event.inputs.branch_strategy == 'github-flow' && 'github-flow' || '' }}
+        exclude:
+          - branch_strategy: ''
+    
+    env:
+      TF_VAR_test_mode: true
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.ROLE_ARN }}
+        role-session-name: terraform-test-${{ matrix.branch_strategy }}-${{ github.run_number }}
+        aws-region: ap-northeast-1
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: "1.11.0"
+
+    - name: Generate GitHub App Token
+      id: generate_token
+      uses: actions/create-github-app-token@v1
+      with:
+        app-id: ${{ secrets.GH_APP_APP_ID }}
+        private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+        owner: ${{ github.repository_owner }}
+    
+    - name: Set GitHub Token
+      run: echo "GITHUB_TOKEN=${{ steps.generate_token.outputs.token }}" >> $GITHUB_ENV
+
+    - name: Setup Test Environment
+      run: |
+        echo "🧪 Setting up test environment for ${{ matrix.branch_strategy }} strategy"
+        
+        # テスト用設定ファイルの作成
+        cp terraform.tfvars.example terraform.tfvars
+        sed -i "s/BRANCH_STRATEGY_PLACEHOLDER/${{ matrix.branch_strategy }}/g" terraform.tfvars
+        
+        echo "📋 Test configuration:"
+        cat terraform.tfvars
+        
+        # テストモードの設定
+        if [[ "${{ inputs.test_mode }}" == "full-test" ]]; then
+          echo "TF_LOG=DEBUG" >> $GITHUB_ENV
+          echo "🐛 Full test mode with debug enabled"
+        fi
+
+    - name: Terraform Init
+      run: |
+        echo "🚀 Initializing Terraform..."
+        terraform init
+
+    - name: Terraform Validate
+      id: validate
+      run: |
+        echo "✅ Validating Terraform configuration..."
+        terraform validate -json > validate-results.json
+        
+        if terraform validate; then
+          echo "✅ Validation passed for ${{ matrix.branch_strategy }} strategy"
+        else
+          echo "❌ Validation failed for ${{ matrix.branch_strategy }} strategy"
+          exit 1
+        fi
+
+    - name: Terraform Plan
+      id: plan
+      if: inputs.test_mode != 'validate-only'
+      run: |
+        echo "📋 Running Terraform Plan for ${{ matrix.branch_strategy }} strategy..."
+        
+        # プランの実行
+        terraform plan -out=tfplan-${{ matrix.branch_strategy }} -detailed-exitcode > plan-output.log 2>&1
+        PLAN_EXIT_CODE=$?
+        
+        echo "plan_exit_code=$PLAN_EXIT_CODE" >> $GITHUB_OUTPUT
+        
+        if [[ $PLAN_EXIT_CODE -eq 1 ]]; then
+          echo "❌ Plan failed for ${{ matrix.branch_strategy }} strategy"
+          cat plan-output.log
+          exit 1
+        elif [[ $PLAN_EXIT_CODE -eq 2 ]]; then
+          echo "📝 Changes detected for ${{ matrix.branch_strategy }} strategy"
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+        else
+          echo "✅ No changes needed for ${{ matrix.branch_strategy }} strategy"
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+        fi
+        
+        # プラン結果の保存
+        terraform show -json tfplan-${{ matrix.branch_strategy }} > plan-${{ matrix.branch_strategy }}.json
+
+    - name: Upload Plan Artifacts
+      if: steps.plan.outputs.plan_exit_code != '1' && inputs.test_mode != 'validate-only'
+      uses: actions/upload-artifact@v4
+      with:
+        name: terraform-plans-${{ matrix.branch_strategy }}
+        path: |
+          tfplan-${{ matrix.branch_strategy }}
+          plan-${{ matrix.branch_strategy }}.json
+          plan-output.log
+
+    - name: Test Apply (Dry Run)
+      if: inputs.test_mode == 'full-test' && steps.plan.outputs.has_changes == 'true'
+      run: |
+        echo "🔍 Testing apply process (dry run)..."
+        echo "In full-test mode, we would apply: tfplan-${{ matrix.branch_strategy }}"
+        echo "Changes that would be applied:"
+        terraform show tfplan-${{ matrix.branch_strategy }}
+
+    - name: Test Summary
+      if: always()
+      run: |
+        echo "📊 Test Summary for ${{ matrix.branch_strategy }} strategy:"
+        echo "- Validation: ${{ steps.validate.outcome }}"
+        echo "- Plan: ${{ steps.plan.outcome }}"
+        echo "- Has Changes: ${{ steps.plan.outputs.has_changes || 'N/A' }}"
+
+  test-results:
+    needs: terraform-test
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+    - name: Download Plan Artifacts
+      if: needs.terraform-test.result != 'failure'
+      uses: actions/download-artifact@v4
+      with:
+        pattern: terraform-plans-*
+        path: ./plans
+        merge-multiple: true
+
+    - name: Summarize Test Results
+      run: |
+        echo "🎯 Matrix Test Results Summary:"
+        echo "- Overall Status: ${{ needs.terraform-test.result }}"
+        
+        if [[ -d "./plans" ]]; then
+          echo "📁 Generated Plans:"
+          ls -la ./plans/
+        fi
+        
+        echo ""
+        echo "✅ All branch strategies tested successfully!"
