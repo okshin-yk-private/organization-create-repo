@@ -35,10 +35,12 @@ permissions:
 jobs:
   terraform-test:
     runs-on: ubuntu-latest
+
     timeout-minutes: 25  # ジョブ全体のタイムアウト（クリーンアップ追加で延長）
     strategy:
       fail-fast: false
       max-parallel: 2  # 並列実行を少し増やしてパフォーマンス向上（リソース名ユニーク化により競合回避）
+
       matrix:
         branch_strategy: 
           - ${{ github.event.inputs.branch_strategy == 'both' && 'gitflow' || github.event.inputs.branch_strategy == 'gitflow' && 'gitflow' || github.event.inputs.branch_strategy == 'github-flow' && 'github-flow' || 'gitflow' }}
@@ -83,6 +85,7 @@ jobs:
       run: echo "GITHUB_TOKEN=${{ steps.generate_token.outputs.token }}" >> $GITHUB_ENV
 
     - name: Setup Test Environment
+
       timeout-minutes: 3  # 環境設定のタイムアウト（クリーンアップ追加のため延長）
       run: |
         echo "🧪 ${{ matrix.branch_strategy }}戦略のテスト環境を設定中"
@@ -117,38 +120,6 @@ jobs:
         # HTTP_PROXY設定でダウンロードを高速化
         terraform init -upgrade
 
-    - name: Cleanup Previous State (Test Mode)
-      timeout-minutes: 5  # state cleanup timeout
-      run: |
-        echo "🧹 既存のテスト用リソースをクリーンアップ中..."
-        
-        # 既存のstateから古いテスト用リポジトリを削除
-        if terraform state list | grep -E "github_repository\.(repo|repos)" > /dev/null 2>&1; then
-          echo "🗑️ 既存のリポジトリリソースを検出、削除を試行"
-          
-          # 保護ルールから削除
-          terraform state list | grep "github_branch_protection" | while read resource; do
-            echo "削除: $resource"
-            terraform destroy -target="$resource" -auto-approve || true
-          done
-          
-          # ブランチから削除
-          terraform state list | grep "github_branch" | while read resource; do
-            echo "削除: $resource"  
-            terraform destroy -target="$resource" -auto-approve || true
-          done
-          
-          # リポジトリから削除（GitHub上のテスト用リポジトリも削除）
-          terraform state list | grep -E "github_repository\.(repo|repos)" | while read resource; do
-            echo "削除: $resource"
-            terraform destroy -target="$resource" -auto-approve || true
-          done
-          
-          echo "✅ 既存リソースのクリーンアップ完了"
-        else
-          echo "✅ クリーンアップ対象のリソースなし"
-        fi
-
     - name: Terraform Validate
       id: validate
       run: |
@@ -182,6 +153,7 @@ jobs:
             cat plan-output.log
           else
             echo "⚠️ リトライ $i/3: 30秒待機中...（終了コード: $PLAN_EXIT_CODE）"
+
             sleep 30
           fi
         done
@@ -228,24 +200,6 @@ jobs:
         echo "- 検証: ${{ steps.validate.outcome }}"
         echo "- プラン: ${{ steps.plan.outcome }}"
         echo "- 変更有無: ${{ steps.plan.outputs.has_changes || 'N/A' }}"
-
-    - name: Cleanup Test Resources
-      if: always()  # 成功・失敗に関わらずクリーンアップを実行
-      timeout-minutes: 5
-      run: |
-        echo "🧹 テスト用リソースをクリーンアップ中..."
-        
-        # テスト用に作成されたリポジトリを削除
-        if [[ -n "$TEST_REPO_NAME" ]] && terraform state list | grep "github_repository" > /dev/null 2>&1; then
-          echo "🗑️ テスト用リポジトリを削除: $TEST_REPO_NAME"
-          terraform destroy -auto-approve || echo "⚠️ リソース削除に一部失敗（問題ありません）"
-        else
-          echo "✅ クリーンアップ対象なし"
-        fi
-        
-        # 一時ファイルの削除
-        rm -f terraform.tfvars tfplan-* plan-*.json plan-output.log validate-results.json || true
-        echo "✅ テストクリーンアップ完了"
 
   test-results:
     needs: terraform-test
