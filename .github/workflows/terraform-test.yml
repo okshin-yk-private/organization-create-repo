@@ -146,7 +146,11 @@ jobs:
           PLAN_EXIT_CODE=$?
           
           if [[ $PLAN_EXIT_CODE -eq 0 || $PLAN_EXIT_CODE -eq 2 ]]; then
-            echo "✅ terraform planが成功しました（終了コード: $PLAN_EXIT_CODE）"
+            if [[ $PLAN_EXIT_CODE -eq 0 ]]; then
+              echo "✅ terraform planが成功しました - 変更は検出されませんでした（終了コード: 0）"
+            else
+              echo "✅ terraform planが成功しました - 変更が検出されました（終了コード: 2 - 正常）"
+            fi
             break
           elif [[ $i -eq 3 ]]; then
             echo "❌ 3回のリトライ後も失敗（終了コード: $PLAN_EXIT_CODE）"
@@ -174,6 +178,18 @@ jobs:
         
         # プラン結果の保存
         terraform show -json tfplan-${{ matrix.branch_strategy }} > plan-${{ matrix.branch_strategy }}.json
+        
+        # 結果サマリー
+        echo ""
+        echo "📊 Terraform Plan結果サマリー:"
+        echo "   戦略: ${{ matrix.branch_strategy }}"
+        echo "   終了コード: $PLAN_EXIT_CODE"
+        case $PLAN_EXIT_CODE in
+          0) echo "   結果: ✅ 変更なし（インフラは最新状態）" ;;
+          2) echo "   結果: ✅ 変更あり（正常 - リソース作成/更新予定）" ;;
+          *) echo "   結果: ❌ エラー" ;;
+        esac
+        echo ""
 
     - name: Upload Plan Artifacts
       if: steps.plan.outputs.plan_exit_code != '1' && inputs.test_mode != 'validate-only'
