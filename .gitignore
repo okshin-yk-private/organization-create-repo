@@ -70,3 +70,6 @@ credentials.yaml
 # Ignore backup files
 *.backup
 *.bak
+
+# Ignore .claude
+.claude/ 
