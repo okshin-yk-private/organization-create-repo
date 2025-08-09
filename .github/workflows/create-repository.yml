@@ -99,6 +99,10 @@ jobs:
             echo "2. 既存リポジトリの更新を許可する場合は \`update_existing\` を \`true\` に設定" >> $GITHUB_STEP_SUMMARY
             echo "3. 既存リポジトリを手動で削除してから再実行" >> $GITHUB_STEP_SUMMARY
             
+            # エラー情報をファイルに保存（後続のステップで参照）
+            echo "EXISTING_REPOSITORY_ERROR" > /tmp/workflow_error
+            echo "Repository '${{ inputs.repository_name }}' already exists and update_existing is false" >> /tmp/workflow_error
+            
             echo "❌ 既存リポジトリが存在するため処理を中止します"
             echo "update_existing パラメータを true に設定すると更新モードで実行できます"
             exit 1
@@ -155,19 +159,7 @@ jobs:
       run: terraform init
 
     - name: Terraform Plan
-      run: |
-        echo "📋 Terraform Planを実行中..."
-        terraform plan -out=tfplan -detailed-exitcode
-        PLAN_EXIT_CODE=$?
-        
-        if [[ $PLAN_EXIT_CODE -eq 1 ]]; then
-          echo "❌ Terraform planが失敗しました"
-          exit 1
-        elif [[ $PLAN_EXIT_CODE -eq 2 ]]; then
-          echo "📝 変更を検出 - プランを適用します"
-        else
-          echo "✅ 変更はありません"
-        fi
+      run: terraform plan -out=tfplan -detailed-exitcode
 
     - name: Terraform Apply
       id: apply
@@ -185,27 +177,45 @@ jobs:
     - name: Output Results
       if: always()
       run: |
-        echo "📊 Terraform出力結果:"
-        
-        if terraform output repository_url > /dev/null 2>&1; then
-          echo "🔗 リポジトリURL:"
-          terraform output repository_url
-          
+        # エラーファイルが存在するかチェック
+        if [[ -f "/tmp/workflow_error" ]]; then
+          echo "📊 実行結果:"
+          echo "❌ ワークフローはエラーで終了しました"
           echo ""
-          echo "🌿 ブランチ情報:"
-          terraform output repository_branches
           
-          echo ""
-          echo "🛡️ 保護ルール:"
-          terraform output branch_protection_summary
-          
-          if terraform output created_branches > /dev/null 2>&1; then
+          ERROR_TYPE=$(head -n 1 /tmp/workflow_error)
+          if [[ "$ERROR_TYPE" == "EXISTING_REPOSITORY_ERROR" ]]; then
+            echo "## エラー詳細"
+            echo "既存リポジトリ \`${{ inputs.repository_name }}\` が存在するため処理を中止しました。"
             echo ""
-            echo "🆕 作成されたブランチ:"
-            terraform output created_branches
+            echo "## 対処方法"
+            echo "1. 別のリポジトリ名を使用する"
+            echo "2. \`update_existing\` パラメータを \`true\` に設定して更新モードで実行"
+            echo "3. 既存リポジトリを手動で削除してから再実行"
           fi
         else
-          echo "⚠️ 出力結果がありません - 上記のエラーを確認してください"
+          echo "📊 Terraform出力結果:"
+          
+          if terraform output repository_url > /dev/null 2>&1; then
+            echo "🔗 リポジトリURL:"
+            terraform output repository_url
+            
+            echo ""
+            echo "🌿 ブランチ情報:"
+            terraform output repository_branches
+            
+            echo ""
+            echo "🛡️ 保護ルール:"
+            terraform output branch_protection_summary
+            
+            if terraform output created_branches > /dev/null 2>&1; then
+              echo ""
+              echo "🆕 作成されたブランチ:"
+              terraform output created_branches
+            fi
+          else
+            echo "⚠️ 出力結果がありません - 上記のエラーを確認してください"
+          fi
         fi
 
     - name: Error Diagnosis
@@ -213,22 +223,46 @@ jobs:
       run: |
         echo "🔍 失敗の原因を診断中..."
         
-        echo "📝 Terraform状態:"
-        terraform show -no-color || echo "状態情報がありません"
-        
-        echo ""
-        echo "📋 Terraform設定:"
-        echo "variables.tf:"
-        head -20 variables.tf
-        
-        echo ""
-        echo "terraform.tfvars:"
-        cat terraform.tfvars
-        
-        echo ""
-        echo "🔧 プロバイダーバージョン:"
-        terraform version
-        
-        echo ""
-        echo "📊 リソース状態:"
-        terraform state list || echo "状態情報がありません"
+        # エラーファイルが存在するかチェック
+        if [[ -f "/tmp/workflow_error" ]]; then
+          echo "📋 ワークフローレベルのエラーが発生しました:"
+          ERROR_TYPE=$(head -n 1 /tmp/workflow_error)
+          ERROR_DETAIL=$(tail -n +2 /tmp/workflow_error)
+          
+          if [[ "$ERROR_TYPE" == "EXISTING_REPOSITORY_ERROR" ]]; then
+            echo "⚠️ エラータイプ: 既存リポジトリの競合"
+            echo "📝 詳細: $ERROR_DETAIL"
+            echo ""
+            echo "## 解決方法:"
+            echo "このエラーはTerraformの問題ではなく、リポジトリの重複によるものです。"
+            echo "1. 異なるリポジトリ名で再実行"
+            echo "2. update_existing=true で更新モードを使用"
+            echo "3. 既存リポジトリを削除後に再実行"
+          fi
+        else
+          echo "📝 Terraform関連のエラーが発生しました:"
+          
+          echo "📝 Terraform状態:"
+          terraform show -no-color || echo "状態情報がありません"
+          
+          echo ""
+          echo "📋 Terraform設定:"
+          if [[ -f "variables.tf" ]]; then
+            echo "variables.tf:"
+            head -20 variables.tf
+          fi
+          
+          echo ""
+          if [[ -f "terraform.tfvars" ]]; then
+            echo "terraform.tfvars:"
+            cat terraform.tfvars
+          fi
+          
+          echo ""
+          echo "🔧 プロバイダーバージョン:"
+          terraform version
+          
+          echo ""
+          echo "📊 リソース状態:"
+          terraform state list || echo "状態情報がありません"
+        fi
