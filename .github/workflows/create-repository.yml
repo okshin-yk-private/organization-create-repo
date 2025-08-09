@@ -4,18 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       repository_name:
-        description: 'Repository name to create (or use default from variables)'
-        required: false
+        description: 'Repository name to create'
+        required: true
         type: string
       branch_strategy:
         description: 'Branch strategy for the repository'
-        required: false
+        required: true
         type: choice
         options:
-          - default
           - gitflow
           - github-flow
-        default: default
+        default: gitflow
       debug_mode:
         description: 'Enable debug output'
         required: false
@@ -62,42 +61,19 @@ jobs:
         # デバッグモードの設定
         if [[ "${{ inputs.debug_mode }}" == "true" ]]; then
           echo "TF_LOG=DEBUG" >> $GITHUB_ENV
-          echo "🐛 Debug mode enabled"
+          echo "🐛 デバッグモードを有効化しました"
         fi
         
         # 動的なterraform.tfvarsファイルの作成
         cat > terraform.tfvars << EOF
-        repositories = {
-        EOF
-        
-        # リポジトリ名とブランチ戦略の設定
-        if [[ -n "${{ inputs.repository_name }}" && "${{ inputs.branch_strategy }}" != "default" ]]; then
-          # 入力パラメータが指定された場合
-          cat >> terraform.tfvars << EOF
-          "${{ inputs.repository_name }}" = {
-            description = "Repository created via GitHub Actions"
-            branch_strategy = "${{ inputs.branch_strategy }}"
-          }
-        EOF
-        else
-          # デフォルト設定を使用
-          cat >> terraform.tfvars << EOF
-          "github-test-1" = {
-            description = "Test repository 1"
-            branch_strategy = "gitflow"
-          }
-          "github-test-2" = {
-            description = "Test repository 2"  
-            branch_strategy = "github-flow"
-          }
-        EOF
-        fi
-        
-        cat >> terraform.tfvars << EOF
+        repository = {
+          name = "${{ inputs.repository_name }}"
+          description = "Repository created via GitHub Actions"
+          branch_strategy = "${{ inputs.branch_strategy }}"
         }
         EOF
         
-        echo "📋 Generated terraform.tfvars:"
+        echo "📋 生成されたterraform.tfvars:"
         cat terraform.tfvars
     
     - name: Terraform Init
@@ -105,28 +81,28 @@ jobs:
 
     - name: Terraform Plan
       run: |
-        echo "📋 Running Terraform Plan..."
+        echo "📋 Terraform Planを実行中..."
         terraform plan -out=tfplan -detailed-exitcode
         PLAN_EXIT_CODE=$?
         
         if [[ $PLAN_EXIT_CODE -eq 1 ]]; then
-          echo "❌ Terraform plan failed"
+          echo "❌ Terraform planが失敗しました"
           exit 1
         elif [[ $PLAN_EXIT_CODE -eq 2 ]]; then
-          echo "📝 Changes detected - plan will be applied"
+          echo "📝 変更を検出 - プランを適用します"
         else
-          echo "✅ No changes detected"
+          echo "✅ 変更はありません"
         fi
 
     - name: Terraform Apply
       id: apply
       run: |
-        echo "🚀 Applying Terraform changes..."
+        echo "🚀 Terraformの変更を適用中..."
         if terraform apply -auto-approve tfplan; then
-          echo "✅ Terraform apply completed successfully"
+          echo "✅ Terraform applyが正常に完了しました"
         else
-          echo "❌ Terraform apply failed"
-          echo "📊 Checking current state..."
+          echo "❌ Terraform applyが失敗しました"
+          echo "📊 現在の状態を確認中..."
           terraform show
           exit 1
         fi
@@ -134,39 +110,39 @@ jobs:
     - name: Output Results
       if: always()
       run: |
-        echo "📊 Terraform Outputs:"
+        echo "📊 Terraform出力結果:"
         
         if terraform output repository_urls > /dev/null 2>&1; then
-          echo "🔗 Repository URLs:"
-          terraform output repository_urls
+          echo "🔗 リポジトリURL:"
+          terraform output repository_url
           
           echo ""
-          echo "🌿 Branch Information:"
+          echo "🌿 ブランチ情報:"
           terraform output repository_branches
           
           echo ""
-          echo "🛡️ Protection Rules:"
+          echo "🛡️ 保護ルール:"
           terraform output branch_protection_summary
           
           if terraform output created_branches > /dev/null 2>&1; then
             echo ""
-            echo "🆕 Created Branches:"
+            echo "🆕 作成されたブランチ:"
             terraform output created_branches
           fi
         else
-          echo "⚠️ No outputs available - check for errors above"
+          echo "⚠️ 出力結果がありません - 上記のエラーを確認してください"
         fi
 
     - name: Error Diagnosis
       if: failure()
       run: |
-        echo "🔍 Diagnosing failure..."
+        echo "🔍 失敗の原因を診断中..."
         
-        echo "📝 Terraform State:"
-        terraform show -no-color || echo "No state available"
+        echo "📝 Terraform状態:"
+        terraform show -no-color || echo "状態情報がありません"
         
         echo ""
-        echo "📋 Terraform Configuration:"
+        echo "📋 Terraform設定:"
         echo "variables.tf:"
         head -20 variables.tf
         
@@ -175,16 +151,9 @@ jobs:
         cat terraform.tfvars
         
         echo ""
-        echo "🔧 Provider Versions:"
+        echo "🔧 プロバイダーバージョン:"
         terraform version
         
         echo ""
-        echo "📊 Resource Status:"
-        terraform state list || echo "No state available"
-    
-    - name: Cleanup
-      if: always()
-      run: |
-        rm -f github_app_key.pem
-        rm -f tfplan
-        rm -f terraform.tfvars
+        echo "📊 リソース状態:"
+        terraform state list || echo "状態情報がありません"

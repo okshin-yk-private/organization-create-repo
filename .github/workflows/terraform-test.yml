@@ -76,36 +76,36 @@ jobs:
 
     - name: Setup Test Environment
       run: |
-        echo "🧪 Setting up test environment for ${{ matrix.branch_strategy }} strategy"
+        echo "🧪 ${{ matrix.branch_strategy }}戦略のテスト環境を設定中"
         
         # テスト用設定ファイルの作成
         cp terraform.tfvars.example terraform.tfvars
         sed -i "s/BRANCH_STRATEGY_PLACEHOLDER/${{ matrix.branch_strategy }}/g" terraform.tfvars
         
-        echo "📋 Test configuration:"
+        echo "📋 テスト設定:"
         cat terraform.tfvars
         
         # テストモードの設定
         if [[ "${{ inputs.test_mode }}" == "full-test" ]]; then
           echo "TF_LOG=DEBUG" >> $GITHUB_ENV
-          echo "🐛 Full test mode with debug enabled"
+          echo "🐛 デバッグ有効なフルテストモード"
         fi
 
     - name: Terraform Init
       run: |
-        echo "🚀 Initializing Terraform..."
+        echo "🚀 Terraformを初期化中..."
         terraform init
 
     - name: Terraform Validate
       id: validate
       run: |
-        echo "✅ Validating Terraform configuration..."
+        echo "✅ Terraform設定を検証中..."
         terraform validate -json > validate-results.json
         
         if terraform validate; then
-          echo "✅ Validation passed for ${{ matrix.branch_strategy }} strategy"
+          echo "✅ ${{ matrix.branch_strategy }}戦略の検証に成功"
         else
-          echo "❌ Validation failed for ${{ matrix.branch_strategy }} strategy"
+          echo "❌ ${{ matrix.branch_strategy }}戦略の検証に失敗"
           exit 1
         fi
 
@@ -113,7 +113,7 @@ jobs:
       id: plan
       if: inputs.test_mode != 'validate-only'
       run: |
-        echo "📋 Running Terraform Plan for ${{ matrix.branch_strategy }} strategy..."
+        echo "📋 ${{ matrix.branch_strategy }}戦略でTerraform Planを実行中..."
         
         # プランの実行
         terraform plan -out=tfplan-${{ matrix.branch_strategy }} -detailed-exitcode > plan-output.log 2>&1
@@ -122,14 +122,14 @@ jobs:
         echo "plan_exit_code=$PLAN_EXIT_CODE" >> $GITHUB_OUTPUT
         
         if [[ $PLAN_EXIT_CODE -eq 1 ]]; then
-          echo "❌ Plan failed for ${{ matrix.branch_strategy }} strategy"
+          echo "❌ ${{ matrix.branch_strategy }}戦略のプランが失敗"
           cat plan-output.log
           exit 1
         elif [[ $PLAN_EXIT_CODE -eq 2 ]]; then
-          echo "📝 Changes detected for ${{ matrix.branch_strategy }} strategy"
+          echo "📝 ${{ matrix.branch_strategy }}戦略で変更を検出"
           echo "has_changes=true" >> $GITHUB_OUTPUT
         else
-          echo "✅ No changes needed for ${{ matrix.branch_strategy }} strategy"
+          echo "✅ ${{ matrix.branch_strategy }}戦略では変更不要"
           echo "has_changes=false" >> $GITHUB_OUTPUT
         fi
         
@@ -146,21 +146,21 @@ jobs:
           plan-${{ matrix.branch_strategy }}.json
           plan-output.log
 
-    - name: Test Apply (Dry Run)
+    - name: Display Plan Details
       if: inputs.test_mode == 'full-test' && steps.plan.outputs.has_changes == 'true'
       run: |
-        echo "🔍 Testing apply process (dry run)..."
-        echo "In full-test mode, we would apply: tfplan-${{ matrix.branch_strategy }}"
-        echo "Changes that would be applied:"
+        echo "🔍 プラン詳細を表示中..."
+        echo "フルテストモード: tfplan-${{ matrix.branch_strategy }}の詳細を表示"
+        echo "プランには以下の変更が含まれます:"
         terraform show tfplan-${{ matrix.branch_strategy }}
 
     - name: Test Summary
       if: always()
       run: |
-        echo "📊 Test Summary for ${{ matrix.branch_strategy }} strategy:"
-        echo "- Validation: ${{ steps.validate.outcome }}"
-        echo "- Plan: ${{ steps.plan.outcome }}"
-        echo "- Has Changes: ${{ steps.plan.outputs.has_changes || 'N/A' }}"
+        echo "📊 ${{ matrix.branch_strategy }}戦略のテストサマリー:"
+        echo "- 検証: ${{ steps.validate.outcome }}"
+        echo "- プラン: ${{ steps.plan.outcome }}"
+        echo "- 変更有無: ${{ steps.plan.outputs.has_changes || 'N/A' }}"
 
   test-results:
     needs: terraform-test
@@ -177,13 +177,13 @@ jobs:
 
     - name: Summarize Test Results
       run: |
-        echo "🎯 Matrix Test Results Summary:"
-        echo "- Overall Status: ${{ needs.terraform-test.result }}"
+        echo "🎯 マトリックステスト結果サマリー:"
+        echo "- 全体的な状態: ${{ needs.terraform-test.result }}"
         
         if [[ -d "./plans" ]]; then
-          echo "📁 Generated Plans:"
+          echo "📁 生成されたプラン:"
           ls -la ./plans/
         fi
         
         echo ""
-        echo "✅ All branch strategies tested successfully!"
+        echo "✅ すべてのブランチ戦略のテストが正常に完了しました！"
