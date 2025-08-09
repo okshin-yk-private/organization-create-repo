@@ -7,59 +7,29 @@ on:
       - '**.tf'
       - '.github/workflows/terraform-test.yml'
   workflow_dispatch:
-    inputs:
-      test_mode:
-        description: 'Test mode'
-        required: true
-        type: choice
-        options:
-          - validate-only
-          - plan-only
-          - full-test
-        default: plan-only
-      branch_strategy:
-        description: 'Branch strategy to test'
-        required: false
-        type: choice
-        options:
-          - gitflow
-          - github-flow
-          - both
-        default: both
 
 permissions:
   id-token: write
   contents: read
-  pull-requests: write  # For commenting on PRs
 
 jobs:
   terraform-test:
     runs-on: ubuntu-latest
-
-    timeout-minutes: 25  # ジョブ全体のタイムアウト（クリーンアップ追加で延長）
+    timeout-minutes: 15
+    
     strategy:
       fail-fast: false
-      max-parallel: 2  # 並列実行を少し増やしてパフォーマンス向上（リソース名ユニーク化により競合回避）
-
       matrix:
-        branch_strategy: 
-          - ${{ github.event.inputs.branch_strategy == 'both' && 'gitflow' || github.event.inputs.branch_strategy == 'gitflow' && 'gitflow' || github.event.inputs.branch_strategy == 'github-flow' && 'github-flow' || 'gitflow' }}
-          - ${{ github.event.inputs.branch_strategy == 'both' && 'github-flow' || github.event.inputs.branch_strategy == 'github-flow' && 'github-flow' || '' }}
-        exclude:
-          - branch_strategy: ''
+        branch_strategy: [gitflow, github-flow]
     
     env:
       TF_VAR_test_mode: true
-      TF_HTTP_MAX_RETRIES: "3"  # Terraform HTTPリトライ回数
-      TF_HTTP_RETRY_WAIT_MIN: "1"  # 最小待機時間(秒)
-      TF_HTTP_RETRY_WAIT_MAX: "30"  # 最大待機時間(秒)
     
     steps:
     - name: Checkout
       uses: actions/checkout@v4
 
     - name: Configure AWS credentials
-      timeout-minutes: 2  # AWS認証のタイムアウト
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: ${{ secrets.ROLE_ARN }}
@@ -70,11 +40,9 @@ jobs:
       uses: hashicorp/setup-terraform@v3
       with:
         terraform_version: "1.11.0"
-        terraform_wrapper: false  # wrapperを無効化して高速化
 
     - name: Generate GitHub App Token
       id: generate_token
-      timeout-minutes: 2  # GitHub App Token生成のタイムアウト
       uses: actions/create-github-app-token@v1
       with:
         app-id: ${{ secrets.GH_APP_APP_ID }}
@@ -85,8 +53,6 @@ jobs:
       run: echo "GITHUB_TOKEN=${{ steps.generate_token.outputs.token }}" >> $GITHUB_ENV
 
     - name: Setup Test Environment
-
-      timeout-minutes: 3  # 環境設定のタイムアウト（クリーンアップ追加のため延長）
       run: |
         echo "🧪 ${{ matrix.branch_strategy }}戦略のテスト環境を設定中"
         
@@ -94,153 +60,26 @@ jobs:
         TEST_REPO_NAME="test-${{ matrix.branch_strategy }}-${{ github.run_number }}-$(date +%s)"
         echo "TEST_REPO_NAME=$TEST_REPO_NAME" >> $GITHUB_ENV
         
-        # テスト用設定ファイルの作成（エラーハンドリング付き）
-        if [[ ! -f terraform.tfvars.example ]]; then
-          echo "❌ terraform.tfvars.exampleファイルが見つかりません"
-          exit 1
-        fi
-        
+        # テスト用設定ファイルの作成
         cp terraform.tfvars.example terraform.tfvars
         sed -i "s/BRANCH_STRATEGY_PLACEHOLDER/${{ matrix.branch_strategy }}/g" terraform.tfvars
         sed -i "s/test-repo-${{ matrix.branch_strategy }}/$TEST_REPO_NAME/g" terraform.tfvars
         
         echo "📋 テスト設定:"
         cat terraform.tfvars
-        
-        # テストモードの設定
-        if [[ "${{ inputs.test_mode }}" == "full-test" ]]; then
-          echo "TF_LOG=DEBUG" >> $GITHUB_ENV
-          echo "🐛 デバッグ有効なフルテストモード"
-        fi
 
     - name: Terraform Init
-      timeout-minutes: 5  # terraform initのタイムアウト（プロバイダーダウンロード考慮）
       run: |
         echo "🚀 Terraformを初期化中..."
-        # HTTP_PROXY設定でダウンロードを高速化
         terraform init -upgrade
 
     - name: Terraform Validate
-      id: validate
       run: |
         echo "✅ Terraform設定を検証中..."
-        terraform validate -json > validate-results.json
-        
-        if terraform validate; then
-          echo "✅ ${{ matrix.branch_strategy }}戦略の検証に成功"
-        else
-          echo "❌ ${{ matrix.branch_strategy }}戦略の検証に失敗"
-          exit 1
-        fi
+        terraform validate
 
     - name: Terraform Plan
-      id: plan
-      timeout-minutes: 8  # terraform planのタイムアウト（API呼び出し考慮）
-      if: inputs.test_mode != 'validate-only'
       run: |
         echo "📋 ${{ matrix.branch_strategy }}戦略でTerraform Planを実行中..."
-        
-        # プランの実行（修正されたリトライ機構付き）
-        for i in {1..3}; do
-          terraform plan -out=tfplan-${{ matrix.branch_strategy }} -detailed-exitcode > plan-output.log 2>&1
-          PLAN_EXIT_CODE=$?
-          
-          if [[ $PLAN_EXIT_CODE -eq 0 || $PLAN_EXIT_CODE -eq 2 ]]; then
-            if [[ $PLAN_EXIT_CODE -eq 0 ]]; then
-              echo "✅ terraform planが成功しました - 変更は検出されませんでした（終了コード: 0）"
-            else
-              echo "✅ terraform planが成功しました - 変更が検出されました（終了コード: 2 - 正常）"
-            fi
-            break
-          elif [[ $i -eq 3 ]]; then
-            echo "❌ 3回のリトライ後も失敗（終了コード: $PLAN_EXIT_CODE）"
-            cat plan-output.log
-          else
-            echo "⚠️ リトライ $i/3: 30秒待機中...（終了コード: $PLAN_EXIT_CODE）"
+        terraform plan -detailed-exitcode
 
-            sleep 30
-          fi
-        done
-        
-        echo "plan_exit_code=$PLAN_EXIT_CODE" >> $GITHUB_OUTPUT
-        
-        if [[ $PLAN_EXIT_CODE -eq 1 ]]; then
-          echo "❌ ${{ matrix.branch_strategy }}戦略のプランが失敗"
-          cat plan-output.log
-          exit 1
-        elif [[ $PLAN_EXIT_CODE -eq 2 ]]; then
-          echo "📝 ${{ matrix.branch_strategy }}戦略で変更を検出"
-          echo "has_changes=true" >> $GITHUB_OUTPUT
-        else
-          echo "✅ ${{ matrix.branch_strategy }}戦略では変更不要"
-          echo "has_changes=false" >> $GITHUB_OUTPUT
-        fi
-        
-        # プラン結果の保存
-        terraform show -json tfplan-${{ matrix.branch_strategy }} > plan-${{ matrix.branch_strategy }}.json
-        
-        # 結果サマリー
-        echo ""
-        echo "📊 Terraform Plan結果サマリー:"
-        echo "   戦略: ${{ matrix.branch_strategy }}"
-        echo "   終了コード: $PLAN_EXIT_CODE"
-        case $PLAN_EXIT_CODE in
-          0) echo "   結果: ✅ 変更なし（インフラは最新状態）" ;;
-          2) echo "   結果: ✅ 変更あり（正常 - リソース作成/更新予定）" ;;
-          *) echo "   結果: ❌ エラー" ;;
-        esac
-        echo ""
-
-    - name: Upload Plan Artifacts
-      if: steps.plan.outputs.plan_exit_code != '1' && inputs.test_mode != 'validate-only'
-      uses: actions/upload-artifact@v4
-      with:
-        name: terraform-plans-${{ matrix.branch_strategy }}
-        path: |
-          tfplan-${{ matrix.branch_strategy }}
-          plan-${{ matrix.branch_strategy }}.json
-          plan-output.log
-
-    - name: Display Plan Details
-      if: inputs.test_mode == 'full-test' && steps.plan.outputs.has_changes == 'true'
-      run: |
-        echo "🔍 プラン詳細を表示中..."
-        echo "フルテストモード: tfplan-${{ matrix.branch_strategy }}の詳細を表示"
-        echo "プランには以下の変更が含まれます:"
-        terraform show tfplan-${{ matrix.branch_strategy }}
-
-    - name: Test Summary
-      if: always()
-      run: |
-        echo "📊 ${{ matrix.branch_strategy }}戦略のテストサマリー:"
-        echo "- 検証: ${{ steps.validate.outcome }}"
-        echo "- プラン: ${{ steps.plan.outcome }}"
-        echo "- 変更有無: ${{ steps.plan.outputs.has_changes || 'N/A' }}"
-
-  test-results:
-    needs: terraform-test
-    runs-on: ubuntu-latest
-    timeout-minutes: 5  # 結果集約のタイムアウト
-    if: always()
-    steps:
-    - name: Download Plan Artifacts
-      if: needs.terraform-test.result != 'failure'
-      timeout-minutes: 3  # artifactダウンロードのタイムアウト
-      uses: actions/download-artifact@v4
-      with:
-        pattern: terraform-plans-*
-        path: ./plans
-        merge-multiple: true
-
-    - name: Summarize Test Results
-      run: |
-        echo "🎯 マトリックステスト結果サマリー:"
-        echo "- 全体的な状態: ${{ needs.terraform-test.result }}"
-        
-        if [[ -d "./plans" ]]; then
-          echo "📁 生成されたプラン:"
-          ls -la ./plans/
-        fi
-        
-        echo ""
-        echo "✅ すべてのブランチ戦略のテストが正常に完了しました！"
