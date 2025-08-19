@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       repository_name:
-        description: 'Repository name to create'
+        description: 'リポジトリ名'
         required: true
         type: string
       branch_strategy:
-        description: 'Branch strategy for the repository'
+        description: 'ブランチ戦略'
         required: true
         type: choice
         options:
@@ -16,12 +16,12 @@ on:
           - github-flow
         default: gitflow
       update_existing:
-        description: '既存リポジトリの更新を許可する場合はチェックを入れてください'
+        description: '既存リポジトリの更新を許可する場合はチェック'
         required: false
         type: boolean
         default: false
       debug_mode:
-        description: 'Enable debug output'
+        description: 'デバッグ出力'
         required: false
         type: boolean
         default: false
