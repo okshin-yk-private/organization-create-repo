@@ -1,6 +1,6 @@
 # GitHub Organization Repository Creator
 
-GitHub ActionsとTerraformを使用して、組織内にリポジトリを自動作成するツールです。
+GitHub ActionsとTerraformを使用して、組織内にリポジトリを自動作成
 
 ## 機能
 
